@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Детали зоны</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Inter, sans-serif; background:#0f1115; color:#e9edf5; margin:0; padding:20px; }
+    h2,h3 { color:#4f8cff; }
+    .dashboard { display:grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap:16px; margin-bottom:20px; }
+    .kpi { background:#16191f; border:1px solid #222733; border-radius:12px; padding:16px; text-align:center; }
+    .kpi h3 { margin:0; font-size:14px; color:#a3a9b7; }
+    .kpi p { margin:8px 0 0; font-size:22px; font-weight:bold; color:#fff; }
+    .card { background:#16191f; border:1px solid #222733; border-radius:12px; padding:16px; margin-bottom:20px; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { border:1px solid #333; padding:8px; text-align:left; }
+    th { background:#1c2029; }
+  </style>
+</head>
+<body>
+  <h2>Детали зоны</h2>
+
+  <!-- KPI карточки -->
+  <div class="dashboard">
+    <div class="kpi"><h3>Готовность</h3><p id="kpiProgress">–</p></div>
+    <div class="kpi"><h3>Отставание по срокам</h3><p id="kpiDelay">–</p></div>
+    <div class="kpi"><h3>Стоимость выполненных работ</h3><p id="kpiCost">–</p></div>
+    <div class="kpi"><h3>Сегменты</h3><p id="kpiSegments">–</p></div>
+  </div>
+
+  <!-- Карточка зоны -->
+  <div id="zoneInfo" class="card"></div>
+
+  <!-- План-факт таблица -->
+  <div class="card">
+    <h3>План‑факт таблица</h3>
+    <table id="planFactTable"></table>
+  </div>
+
+  <!-- График динамики -->
+  <div class="card">
+    <h3>График динамики выполнения</h3>
+    <canvas id="progressChart"></canvas>
+  </div>
+
+  <!-- Stacked bar chart -->
+  <div class="card">
+    <h3>Выполнение по неделям (объёмы)</h3>
+    <canvas id="stackedChart"></canvas>
+  </div>
+
+  <!-- Сводка по подрядчику -->
+  <div class="card">
+    <h3>Сводка по подрядчику</h3>
+    <table id="contractorSummary"></table>
+  </div>
+
+  <div class="card">
+    <h3>Сравнение со сметой (зона)</h3>
+    <table id="budgetTable"></table>
+    <canvas id="budgetChart"></canvas>
+  </div>
+
+<script>
+  // читаем параметры из URL
+  const params = new URLSearchParams(window.location.search);
+  const zoneId = params.get("id") || "zone_1";
+  const objectId = params.get("object") || "obj_065";
+
+  // ⚠️ пока данные моковые, позже можно подгружать с сервера
+  const zone = {
+    id: zoneId,
+    contractor: "ООО «ГранитСтрой»",
+    progress: 0.6,
+    status: "in_progress",
+    plan: { плитка: 1000, бордюры: 433, мафы: 66 },
+    fact: { плитка: 740, бордюры: 400, мафы: 30 },
+    budget: { plan: 12500000, fact: 7500000 }, // 👈 добавили смету
+    weekly: { labels:["Неделя 1","Неделя 2","Неделя 3","Неделя 4"], plan:[20,40,60,100], fact:[10,35,44,60] },
+    volumes: { плитка:[200,240,100,200], бордюры:[100,120,100,100], мафы:[5,5,6,4] }
+  };
+
+  // KPI карточки
+  document.getElementById("kpiProgress").textContent = (zone.progress*100).toFixed(0) + "%";
+  document.getElementById("kpiDelay").textContent = "5 дней"; // пример
+  document.getElementById("kpiCost").textContent = "≈ 12.5 млн ₽"; // пример
+  document.getElementById("kpiSegments").textContent = "3 (0 выполнено, 3 в процессе, 3 отстаёт)";
+
+  // карточка зоны
+  document.getElementById("zoneInfo").innerHTML = `
+    <p><strong>Зона:</strong> ${zone.id}</p>
+    <p><strong>Подрядчик:</strong> ${zone.contractor}</p>
+    <p><strong>Прогресс:</strong> ${(zone.progress*100).toFixed(0)}%</p>
+    <p><strong>Статус:</strong> ${zone.status}</p>
+  `;
+
+  // таблица план‑факт
+  const table = document.getElementById("planFactTable");
+  table.innerHTML = `
+    <tr><th>Показатель</th><th>План</th><th>Факт</th><th>Отклонение</th></tr>
+    <tr><td>Площадь плитки</td><td>${zone.plan.плитка} м²</td><td>${zone.fact.плитка} м²</td><td>${(zone.fact.плитка-zone.plan.плитка)} м²</td></tr>
+    <tr><td>Бордюры</td><td>${zone.plan.бордюры} м</td><td>${zone.fact.бордюры} м</td><td>${(zone.fact.бордюры-zone.plan.бордюры)} м</td></tr>
+    <tr><td>МАФы</td><td>${zone.plan.мафы} шт</td><td>${zone.fact.мафы} шт</td><td>${(zone.fact.мафы-zone.plan.мафы)} шт</td></tr>
+  `;
+
+  // график динамики
+  const ctx = document.getElementById('progressChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: zone.weekly.labels,
+      datasets: [
+        { label:'План', data:zone.weekly.plan, borderColor:'#4f8cff', fill:false },
+        { label:'Факт', data:zone.weekly.fact, borderColor:'#2bd27e', fill:false }
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ labels:{ color:'#e9edf5' } } },
+      scales:{
+        x:{ ticks:{ color:'#a3a9b7'} },
+        y:{ ticks:{ color:'#a3a9b7'} }
+      }
+    }
+  });
+
+  // stacked bar chart
+  const ctx2 = document.getElementById('stackedChart').getContext('2d');
+  new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: zone.weekly.labels,
+      datasets: [
+        { label:'Плитка (м²)', data:zone.volumes.плитка, backgroundColor:'#4f8cff' },
+        { label:'Бордюры (м)', data:zone.volumes.бордюры, backgroundColor:'#2bd27e' },
+        { label:'МАФы (шт)', data:zone.volumes.мафы, backgroundColor:'#f2c94c' }
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ labels:{ color:'#e9edf5' } } },
+      scales:{
+        x:{ stacked:true, ticks:{ color:'#a3a9b7'} },
+        y:{ stacked:true, ticks:{ color:'#a3a9b7'} }
+      }
+    }
+  });
+
+  const budgetTable = document.getElementById("budgetTable");
+const deviation = zone.budget.fact - zone.budget.plan;
+const percent = ((zone.budget.fact / zone.budget.plan) * 100).toFixed(0);
+budgetTable.innerHTML = `
+  <tr><th>Показатель</th><th>План (₽)</th><th>Факт (₽)</th><th>Отклонение</th><th>% выполнения</th></tr>
+  <tr>
+    <td>Стоимость работ</td>
+    <td>${zone.budget.plan.toLocaleString()}</td>
+    <td>${zone.budget.fact.toLocaleString()}</td>
+    <td>${deviation.toLocaleString()}</td>
+    <td>${percent}%</td>
+  </tr>
+`;
+
+// график сметы
+const ctxBudget = document.getElementById('budgetChart').getContext('2d');
+new Chart(ctxBudget, {
+  type: 'bar',
+  data: {
+    labels: ['Стоимость работ'],
+    datasets: [
+      { label:'План (₽)', data:[zone.budget.plan], backgroundColor:'#555' },
+      { label:'Факт (₽)', data:[zone.budget.fact], backgroundColor:'#ff5c77' }
+    ]
+  },
+  options: {
+    responsive:true,
+    plugins:{ legend:{ labels:{ color:'#e9edf5' } } },
+    scales:{
+      x:{ ticks:{ color:'#a3a9b7'} },
+      y:{ ticks:{ color:'#a3a9b7'}, beginAtZero:true }
+    }
+  }
+});
+
+  // сводка по подрядчику
+  document.getElementById("contractorSummary").innerHTML = `
+    <tr><th>Всего зон</th><th>Выполнено</th><th>В процессе</th><th>Отставание</th></tr>
+    <tr><td>3</td><td>0</td><td>3</td><td>3</td></tr>
+  `;
+</script>
+</body>
+</html>

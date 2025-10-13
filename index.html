@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Благоустройство — карта и видео синхронизация</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Yandex Maps API -->
+  <script src="https://api-maps.yandex.ru/2.1/?apikey=<YOUR_YANDEX_API_KEY>&lang=ru_RU" type="text/javascript"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #16191f;
+      --muted: #a3a9b7;
+      --text: #e9edf5;
+      --accent: #4f8cff;
+      --accent2: #2bd27e;
+      --danger: #ff5c77;
+      --warn: #f2c94c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #222733;
+    }
+    header .brand { font-weight: 600; letter-spacing: 0.2px; }
+    header .filters { display: flex; gap: 8px; }
+    header select, header button {
+      background: #0b0d12; color: var(--text);
+      border: 1px solid #222733; border-radius: 8px;
+      padding: 8px 10px; font-size: 14px;
+    }
+    main { display: grid; grid-template-columns: 1fr 380px; gap: 12px; padding: 12px; }
+    #cityView, #objectView { display: contents; }
+    .card {
+      background: var(--panel); border: 1px solid #222733; border-radius: 12px; overflow: hidden;
+    }
+    .card h3 { margin: 0; padding: 10px 12px; border-bottom: 1px solid #222733; font-size: 14px; color: var(--muted); }
+    #mapCity, #mapObject { width: 100%; height: 60vh; }
+    #sidePanel { height: 60vh; display: flex; flex-direction: column; }
+    #summary { padding: 12px; border-bottom: 1px solid #222733; }
+    #contractors { flex: 1; overflow-y: auto; }
+    .contractorItem { padding: 10px 12px; border-bottom: 1px dashed #222733; }
+    .progressBar { height: 8px; background: #0b0d12; border-radius: 6px; overflow: hidden; margin-top: 6px; }
+    .progressBar > div { height: 100%; background: var(--accent2); }
+    .legend { display: flex; gap: 12px; padding: 10px 12px; border-top: 1px solid #222733; }
+    .legend .item { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .legend .swatch { width: 12px; height: 12px; border-radius: 3px; }
+    /* Video + scrubber */
+    #mediaCard { margin-top: 12px; }
+    #videoWrap { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 12px; }
+    video { width: 100%; background: #000; border-radius: 8px; border: 1px solid #222733; }
+    #scrubber {
+      position: relative; height: 28px; background: #0b0d12;
+      border: 1px solid #222733; border-radius: 8px; display: flex; align-items: center;
+      padding: 0 8px; user-select: none;
+    }
+    #scrubberTrack {
+      position: relative; width: 100%; height: 4px; background: #1a1f2b; border-radius: 4px;
+    }
+    #scrubberCursor {
+      position: absolute; top: -6px; width: 12px; height: 16px; background: var(--accent);
+      border-radius: 3px; transform: translateX(-50%); cursor: pointer;
+    }
+    #scrubber .timeLabel { font-size: 12px; color: var(--muted); margin-left: 8px; min-width: 60px; }
+    /* Popup styling */
+    .balloon {
+      font-size: 13px; color: #111; /* Yandex balloons are light-themed */
+    }
+    .btn {
+      background: var(--accent); color: white; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer;
+    }
+    .btn.secondary { background: #23304a; color: var(--text); }
+    @media (max-width: 1080px) {
+      main { grid-template-columns: 1fr; }
+      #sidePanel { height: auto; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">Urban Progress — демо</div>
+  <div class="filters">
+    <select id="citySelect">
+      <option value="moscow">Москва</option>
+      <option value="test">Тестовый город</option>
+    </select>
+    <button id="resetBtn">На главную</button>
+  </div>
+</header>
+
+<main>
+  <!-- City view -->
+  <section id="cityView">
+    <div class="card">
+      <h3>Карта объектов</h3>
+      <div id="mapCity"></div>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:#4f8cff"></span> Объект</div>
+        <div class="item"><span class="swatch" style="background:#2bd27e"></span> Прогресс высокий</div>
+        <div class="item"><span class="swatch" style="background:#f2c94c"></span> В процессе</div>
+        <div class="item"><span class="swatch" style="background:#ff5c77"></span> Отставание</div>
+      </div>
+    </div>
+
+    <div class="card" id="mediaCard">
+      <h3>Справка</h3>
+      <div id="videoWrap">
+        <div style="color: var(--muted);">
+          Выберите объект на карте Москвы, чтобы перейти к детальной странице с треком, зонами подрядчиков и синхронизированным видео.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Object drilldown view -->
+  <section id="objectView" style="display:none;">
+    <div class="card">
+      <h3>Карта объекта</h3>
+      <div id="mapObject"></div>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:#2bd27e"></span> Выполнено</div>
+        <div class="item"><span class="swatch" style="background:#f2c94c"></span> В процессе</div>
+        <div class="item"><span class="swatch" style="background:#ff5c77"></span> Отставание</div>
+        <div class="item"><span class="swatch" style="background:#4f8cff"></span> Трек</div>
+      </div>
+    </div>
+    <div class="card" id="sidePanel">
+      <h3>Сводка по подрядчикам</h3>
+      <div id="summary"></div>
+      <div id="contractors"></div>
+    </div>
+    <div class="card" id="mediaCard">
+      <h3>Видео проезда и синхронизация с картой</h3>
+      <div id="videoWrap">
+        <video id="driveVideo" controls preload="metadata" src="https://storage.yandexcloud.net/public-demo/road_demo.mp4"></video>
+        <div id="scrubber">
+          <div id="scrubberTrack">
+            <div id="scrubberCursor" style="left:0;"></div>
+          </div>
+          <div class="timeLabel" id="timeLabel">00:00 / 00:00</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="playSync">Играть синхронно</button>
+          <button class="btn secondary" id="pauseSync">Пауза</button>
+          <button class="btn secondary" id="recenter">Фокус на курсор</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+  <h3>История съёмок</h3>
+  <div style="padding:12px;">
+    <div><strong>Последняя съёмка:</strong> <span id="lastCapture">—</span></div>
+    <label for="captureDate" style="display:block; margin-top:10px;">Выберите дату:</label>
+    <select id="captureDate">
+      <option value="2025-09-15">15.09.2025</option>
+      <option value="2025-09-25">25.09.2025</option>
+      <option value="2025-10-05" selected>05.10.2025</option>
+    </select>
+    <div id="timelapsePreview" style="margin-top:12px;">
+      <video id="timelapseVideo" controls width="100%">
+        <source src="timelapse_2025-10-05.mp4" type="video/mp4">
+      </video>
+    </div>
+  </div>
+</div>
+
+  </section>
+</main>
+
+<script>
+/* =========================
+   Mock data (replace later)
+   ========================= */
+function openObjectSummary() {
+  window.location.href = "object.html"; // страница общей сводки
+}
+
+// Объекты в Москве
+const OBJECTS = [
+  {
+    id: 'obj_065',
+    name: 'Улица 65‑летия Октября',
+    city: 'moscow',
+    center: [55.706013, 37.580519], // широта, долгота
+    overallProgress: 0.65,
+    status: 'in_progress',
+    videoSrc: 'video1.mp4'
+  },
+  {
+    id: 'obj_002',
+    name: 'Благоустройство — Арбат',
+    city: 'moscow',
+    center: [ 55.752, 37.597], // Арбат
+    overallProgress: 0.42,
+    status: 'lagging'
+  },
+  {
+    id: 'obj_003',
+    name: 'Парк — Чистые пруды',
+    city: 'moscow',
+    center: [ 55.764, 37.638], // Чистые пруды
+    overallProgress: 0.85,
+    status: 'done'
+  }
+];
+
+// Per-object zones (polygons) with contractor and % progress
+const ZONES_BY_OBJECT = {
+  obj_065: [
+    {
+      id: 'zone_1',
+      contractor: 'ООО «ГранитСтрой»',
+      progress: 0.6,
+      status: 'in_progress',
+      polygon: [
+        [55.705914, 37.580448],[55.705942, 37.580210],
+        [55.704800, 37.579810],[55.703150, 37.579206],
+        [55.702504, 37.578984],
+        [55.702124, 37.579074],[55.704468, 37.579933],
+        [55.705914, 37.580448]
+      ]
+    },
+    {
+      id: 'zone_2',
+      contractor: 'ООО «СветЛайн»',
+      progress: 0.8,
+      status: 'done',
+      polygon: [
+        [55.692675, 37.575458], 
+        [55.692689, 37.575589], [55.692664, 37.575671],
+        [55.692610, 37.575692], [55.689791, 37.574697],
+        [55.689641, 37.574641], [55.689477, 37.574534],
+        [55.688948, 37.574359], [55.688994, 37.574126],
+
+        [55.689383, 37.574318],
+        [55.689769, 37.574459], [55.691828, 37.575173],
+
+
+        [55.692675, 37.575458]
+      ]
+    },
+    {
+      id: 'zone_3',
+      contractor: 'ООО «МАФ‑Про»',
+      progress: 0.4,
+      status: 'lagging',
+      polygon: [
+        [55.701160, 37.578714], [55.701201, 37.578661],
+        [55.701197, 37.578508], [55.700638, 37.578307],
+        [55.698806, 37.577682], [55.697641, 37.577233],
+        [55.696588, 37.576826], [55.694649, 37.576130],
+
+        [55.692893, 37.575537],[55.692862, 37.575764],
+        [55.692914, 37.575798], [55.693065, 37.575851],
+
+        [55.693107, 37.575815], [55.693852, 37.576084],
+
+        [55.694480, 37.576297], [55.694489, 37.576353],
+        [55.695209, 37.576609], [55.695222, 37.576514],
+
+        [55.695740, 37.576702], [55.695732, 37.576795],
+        [55.697719, 37.577505], [55.699461, 37.578126],
+
+        [55.699471, 37.578045], [55.699951, 37.578210],
+        [55.699942, 37.578305], [55.700039, 37.578335],
+
+        [55.700050, 37.578245], [55.700766, 37.578491],
+        [55.700758, 37.578585], [55.701106, 37.578711],
+
+        [55.701160, 37.578714]
+      ]
+    }
+  ],
+  obj_002: [
+    {
+      id: 'zone_A', contractor: 'ООО «БордюрПроф»', progress: 0.35, status: 'in_progress',
+      polygon: [
+        [ 55.7565,37.5985],[ 55.7562,37.5992],[ 55.7568,37.6011],[ 55.7573,37.6002]
+      ]
+    }
+  ],
+  obj_003: [
+    {
+      id: 'zone_A', contractor: 'ООО «ПлиткаМастер»', progress: 0.92, status: 'done',
+      polygon: [
+        [ 55.7635,37.6365],[ 55.7631,37.6375],[ 55.7640,37.6392],[ 55.7645,37.6382]
+      ]
+    },
+    {
+      id: 'zone_B', contractor: 'ООО «Зелёный Свет»', progress: 0.79, status: 'in_progress',
+      polygon: [
+        [ 55.7650,37.6385],[ 55.7647,37.6395],[ 55.7652,37.6409],[ 55.7657,37.6400]
+      ]
+    }
+  ]
+};
+
+// Треки (упрощённые, для синхронизации с видео)
+const TRACK_BY_OBJECT = {
+  obj_065: [
+    { coord: [55.706013, 37.580519], t: 0 },
+
+    { coord: [55.705683, 37.580411], t: 1},
+    { coord: [55.705202, 37.580236], t: 2 },
+    { coord: [55.704801, 37.580090], t: 3 },
+    { coord: [55.704260, 37.579900], t: 4 },
+    { coord: [55.703706, 37.579689], t: 5 },
+    { coord: [55.703106, 37.579473], t: 5 },
+    { coord: [55.702475, 37.579237], t: 6},
+    { coord: [55.701847, 37.579009], t: 7 },
+    { coord: [55.701341, 37.578829], t: 8 },
+    { coord: [55.700934, 37.578664], t: 9 },
+    { coord: [55.700452, 37.578492], t: 10 },
+    { coord: [55.700037, 37.578361], t: 11 },
+    { coord: [55.699466, 37.578171], t: 12 },
+    { coord: [55.698823, 37.577932], t: 14 },
+    { coord: [55.698239, 37.577727], t: 15 },
+    { coord: [55.697524, 37.577470], t: 16 },
+    { coord: [55.697045, 37.577296], t: 17 },
+
+
+    { coord: [55.696705, 37.577167], t: 18 },
+    { coord: [55.696207, 37.576989], t: 20 },
+    { coord: [55.695860, 37.576849], t: 21 },
+    { coord: [55.695579, 37.576775], t: 22 },
+    { coord: [55.695223, 37.576635], t: 23 },
+    { coord: [55.694839, 37.576491], t: 24 },
+    { coord: [55.694562, 37.576396], t: 25 },
+    { coord: [55.694341, 37.576326], t: 26 },
+    { coord: [55.694074, 37.576231], t: 27 },
+    { coord: [55.693742, 37.576103], t: 28 },
+    { coord: [55.693418, 37.576008], t: 29 },
+    { coord: [55.693104, 37.575880], t: 30 },
+    { coord: [55.692822, 37.575798], t: 32 },
+    { coord: [55.692515, 37.575679], t: 33 },
+    { coord: [55.692257, 37.575588], t: 34 },
+    { coord: [55.691943, 37.575497], t: 35 },
+    { coord: [55.691557, 37.575349], t: 36 },
+
+    { coord: [55.691360, 37.575279], t: 37 },
+    { coord: [55.691112, 37.575183], t: 38 },
+    { coord: [55.690971, 37.575142], t: 39 },
+    { coord: [55.690629, 37.575015], t: 41 },
+    { coord: [55.690313, 37.574909], t: 42 },
+    { coord: [55.690114, 37.574824], t: 43 },
+    { coord: [55.689927, 37.574769], t: 44 },
+    { coord: [55.689788, 37.574722], t: 45 },
+    { coord: [55.689647, 37.574680], t: 46 },
+    { coord: [55.689525, 37.574625], t: 47 },
+    { coord: [55.689386, 37.574570], t: 48 },
+    { coord: [55.689228, 37.574532], t: 49 },
+    { coord: [55.689023, 37.574451], t: 50 },
+   
+
+
+    
+    { coord: [55.688966, 37.574361], t: 51 }
+  ],
+  obj_002: [
+    { coord: [ 55.751, 37.595], t: 0 },
+    { coord: [ 55.752, 37.597], t: 20 },
+    { coord: [ 55.753, 37.600], t: 40 }
+  ],
+  obj_003: [
+    { coord: [ 55.763, 37.637], t: 0 },
+    { coord: [55.764, 37.638], t: 15 },
+    { coord: [ 55.765, 37.639], t: 30 }
+  ]
+};
+// Color helpers for status/progress
+function statusColor(status) {
+  switch (status) {
+    case 'done': return '#2bd27e';
+    case 'in_progress': return '#f2c94c';
+    case 'lagging': return '#ff5c77';
+    default: return '#888';
+  }
+}
+function progressToColor(p) {
+  if (p >= 0.8) return '#2bd27e';
+  if (p >= 0.5) return '#f2c94c';
+  return '#ff5c77';
+}
+
+/* =========================
+   Yandex Maps setup
+   ========================= */
+
+let cityMap, objectMap;
+let cityMarkers = [];
+let objectPolygons = [];
+let trackLine, trackCursorPlacemark;
+
+let currentObjectId = null;
+let videoEl, scrubberTrackEl, scrubberCursorEl, timeLabelEl;
+let isSyncPlaying = false;
+
+ymaps.ready(init);
+
+function init() {
+  // City view map
+  cityMap = new ymaps.Map('mapCity', {
+    center: [ 55.755, 37.620], zoom: 12, controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
+  });
+  renderCityObjects();
+
+  // Hook UI elements
+  document.getElementById('resetBtn').addEventListener('click', () => showCityView());
+
+  // Video & scrubber refs
+  videoEl = document.getElementById('driveVideo');
+  scrubberTrackEl = document.getElementById('scrubberTrack');
+  scrubberCursorEl = document.getElementById('scrubberCursor');
+  timeLabelEl = document.getElementById('timeLabel');
+
+  // Sync buttons
+  document.getElementById('playSync').addEventListener('click', () => {
+    isSyncPlaying = true; videoEl.play();
+  });
+  document.getElementById('pauseSync').addEventListener('click', () => {
+    isSyncPlaying = false; videoEl.pause();
+  });
+  document.getElementById('recenter').addEventListener('click', () => {
+    if (objectMap && trackCursorPlacemark) {
+      objectMap.setCenter(trackCursorPlacemark.geometry.getCoordinates(), objectMap.getZoom(), { duration: 200 });
+    }
+  });
+
+  // Video time update -> move cursor
+  videoEl.addEventListener('timeupdate', onVideoTimeUpdate);
+  videoEl.addEventListener('loadedmetadata', () => updateTimeLabel());
+
+  // Scrubber drag -> update video time and cursor
+  initScrubberDrag();
+}
+
+function renderCityObjects() {
+  // Clear old markers
+  cityMarkers.forEach(m => cityMap.geoObjects.remove(m));
+  cityMarkers = [];
+
+  OBJECTS.forEach(obj => {
+    const marker = new ymaps.Placemark(obj.center, {
+      hintContent: obj.name,
+      balloonContent: `<div class="balloon"><strong>${obj.name}</strong><br/>Готовность: ${(obj.overallProgress*100).toFixed(0)}%<br/><button onclick="openObject('${obj.id}')">Открыть объект</button></div>`
+    }, {
+      iconColor: statusColor(obj.status)
+    });
+    marker.events.add('click', () => openObject(obj.id));
+    cityMap.geoObjects.add(marker);
+    cityMarkers.push(marker);
+  });
+}
+
+function showCityView() {
+  currentObjectId = null;
+  document.getElementById('cityView').style.display = 'contents';
+  document.getElementById('objectView').style.display = 'none';
+  // Stop video
+  if (videoEl) { videoEl.pause(); videoEl.currentTime = 0; isSyncPlaying = false; }
+}
+
+function openObject(objectId) {
+  currentObjectId = objectId;
+
+  // Toggle views
+  document.getElementById('cityView').style.display = 'none';
+  document.getElementById('objectView').style.display = 'contents';
+
+  // Create/refresh object map
+  if (!objectMap) {
+    objectMap = new ymaps.Map('mapObject', {
+      center: [ 55.755,37.620], zoom: 15, controls: ['zoomControl', 'typeSelector', 'fullscreenControl']
+    });
+  }
+
+  // Center on object
+  const obj = OBJECTS.find(o => o.id === objectId);
+  if (obj.videoSrc) {
+    videoEl.src = obj.videoSrc;
+  } else {
+    videoEl.src = 'мшвущ1юьз4'; // или заглушка
+  }
+
+  objectMap.setCenter(obj.center, 16, { duration: 200 });
+
+  // Clear previous geometry
+  objectPolygons.forEach(p => objectMap.geoObjects.remove(p));
+  objectPolygons = [];
+  if (trackLine) objectMap.geoObjects.remove(trackLine);
+  if (trackCursorPlacemark) objectMap.geoObjects.remove(trackCursorPlacemark);
+
+  // Draw zones
+  const zones = ZONES_BY_OBJECT[objectId] || [];
+  zones.forEach(z => {
+    const poly = new ymaps.Polygon([z.polygon], {
+      hintContent: z.contractor,
+      balloonContent: zoneBalloonHTML(z)
+    }, {
+      fillColor: progressToColor(z.progress) + '88',
+      strokeColor: statusColor(z.status),
+      strokeWidth: 2
+    });
+    // 👇 сохраняем id зоны внутрь свойств полигона
+    poly.properties.set('zoneId', z.id);
+
+    poly.events.add('click', () => {
+    // open detailed page later — for now show balloon with CTA
+    });
+
+    
+
+    objectMap.geoObjects.add(poly);
+    objectPolygons.push(poly);
+  });
+  // Draw track
+  const track = TRACK_BY_OBJECT[objectId] || [];
+  const coords = track.map(p => p.coord);
+  trackLine = new ymaps.Polyline(coords, { hintContent: 'Трек проезда' }, { strokeColor: '#4f8cff', strokeWidth: 3 });
+  objectMap.geoObjects.add(trackLine);
+
+  // Cursor placemark (arrow/car)
+  trackCursorPlacemark = new ymaps.Placemark(coords[0] || obj.center, {
+    hintContent: 'Позиция камеры'
+  }, {
+    preset: 'islands#blueCircleDotIcon'
+  });
+  objectMap.geoObjects.add(trackCursorPlacemark);
+
+  // Fit map to geometry
+  const bounds = ymaps.geoQuery(objectMap.geoObjects).getBounds();
+  if (bounds) objectMap.setBounds(bounds, { checkZoomRange: true, zoomMargin: 30 });
+
+  // Update side panel
+  renderSidePanel(obj, zones);
+
+  // Reset scrubber and video
+  resetScrubberAndVideo(track);
+}
+
+function zoneBalloonHTML(z) {
+  const pct = (z.progress * 100).toFixed(0);
+  return `<div class="balloon">
+    <strong>${z.contractor}</strong><br/>
+    Зона: ${z.id}<br/>
+    Прогресс: ${pct}%<br/>
+    Статус: ${z.status}<br/><br/>
+    <button class="btn" onclick="openZoneDetails('${z.id}')">Открыть детали</button>
+  </div>`;
+}
+
+function openZoneDetails(zoneId) {
+  // Определяем подрядчика по zoneId
+  const zones = ZONES_BY_OBJECT[currentObjectId] || [];
+  const z = zones.find(zz => zz.id === zoneId);
+  if (!z) return;
+
+  // В зависимости от подрядчика открываем нужную страницу
+  if (z.contractor.includes("ГранитСтрой")) {
+    window.location.href = "zone_granit.html";
+  } else if (z.contractor.includes("СветЛайн")) {
+    window.location.href = "zone_svetline.html";
+  } else if (z.contractor.includes("МАФ")) {
+    window.location.href = "zone_mafpro.html";
+  }
+}
+
+
+function renderSidePanel(obj, zones) {
+const summaryEl = document.getElementById('summary');
+summaryEl.innerHTML = `
+  <div><strong>Объект:</strong> ${obj.name}</div>
+  <div><strong>Готовность:</strong> ${(obj.overallProgress*100).toFixed(0)}%</div>
+  <div><strong>Зон подрядчиков:</strong> ${zones.length}</div>
+  <div style="margin-top:10px;">
+    <button class="btn" onclick="openObjectSummary()">Детали</button>
+  </div>
+`;
+
+  const listEl = document.getElementById('contractors');
+  listEl.innerHTML = '';
+  zones.forEach(z => {
+    const item = document.createElement('div');
+    item.className = 'contractorItem';
+    item.innerHTML = `
+      <div><strong>Подрядчик:</strong> ${z.contractor}</div>
+      <div><strong>Зона:</strong> ${z.id}</div>
+      <div class="progressBar"><div style="width:${(z.progress*100).toFixed(0)}%; background:${progressToColor(z.progress)}"></div></div>
+      <div style="margin-top:6px; display:flex; gap:8px;">
+        <button class="btn secondary" onclick="zoomToZone('${z.id}')">Показать зону</button>
+        <button class="btn" onclick="openZoneDetails('${z.id}')">Детали</button>
+      </div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
+function zoomToZone(zoneId) {
+  const poly = objectPolygons.find(p => p.properties.get('zoneId') === zoneId);
+  if (poly) {
+    const bounds = poly.geometry.getBounds();
+    if (bounds) {
+      objectMap.setBounds(bounds, { checkZoomRange: true, zoomMargin: 30 });
+    }
+  }
+}
+
+
+/* =========================
+   Video <-> Map synchronization
+   ========================= */
+
+function resetScrubberAndVideo(track) {
+  // Attach track to element for later lookup
+  scrubberTrackEl.dataset.track = JSON.stringify(track);
+  scrubberCursorEl.style.left = '0px';
+  // Seek video to 0
+  videoEl.currentTime = 0;
+  updateTimeLabel();
+  // Move cursor placemark to first point
+  if (trackCursorPlacemark && track && track.length) {
+    trackCursorPlacemark.geometry.setCoordinates(track[0].coord);
+  }
+}
+
+function interpolateTrackPosition(track, t) {
+  if (!track || track.length === 0) return null;
+  if (t <= track[0].t) return track[0].coord;
+  if (t >= track[track.length - 1].t) return track[track.length - 1].coord;
+
+  for (let i = 0; i < track.length - 1; i++) {
+    const p1 = track[i];
+    const p2 = track[i + 1];
+    if (t >= p1.t && t <= p2.t) {
+      const ratio = (t - p1.t) / (p2.t - p1.t);
+      const lat = p1.coord[0] + ratio * (p2.coord[0] - p1.coord[0]);
+      const lon = p1.coord[1] + ratio * (p2.coord[1] - p1.coord[1]);
+      return [lat, lon];
+    }
+  }
+
+  return null;
+}
+
+
+
+
+
+function onVideoTimeUpdate() {
+  const duration = videoEl.duration || 0;
+  const current = videoEl.currentTime || 0;
+  updateTimeLabel();
+
+  const rect = scrubberTrackEl.getBoundingClientRect();
+  const pct = duration ? (current / duration) : 0;
+  const x = pct * rect.width;
+  scrubberCursorEl.style.left = x + 'px';
+
+  const track = JSON.parse(scrubberTrackEl.dataset.track || '[]');
+  if (!track.length) return;
+
+  const videoToTrackT = mapVideoToTrackTime(current, duration, track);
+  const interpolatedCoord = interpolateTrackPosition(track, videoToTrackT);
+  if (interpolatedCoord && trackCursorPlacemark) {
+    trackCursorPlacemark.geometry.setCoordinates(interpolatedCoord);
+  }
+}
+
+
+// Map video time to track timestamp: linear scaling by total track time
+function mapVideoToTrackTime(videoTime, videoDuration, track) {
+  const totalTrackTime = track[track.length - 1].t - track[0].t;
+  if (videoDuration <= 0 || totalTrackTime <= 0) return track[0].t;
+  const pct = videoTime / videoDuration;
+  return track[0].t + pct * totalTrackTime;
+}
+
+// Find nearest track point by timestamp
+function findNearestPointByTime(track, t) {
+  let best = track[0], bestDiff = Math.abs(track[0].t - t);
+  for (let i=1; i<track.length; i++) {
+    const diff = Math.abs(track[i].t - t);
+    if (diff < bestDiff) { best = track[i]; bestDiff = diff; }
+  }
+  return best;
+}
+
+// Scrubber drag handling
+function initScrubberDrag() {
+  let dragging = false;
+
+  const onPointerDown = (e) => {
+    dragging = true;
+    updateByPointer(e);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp, { once: true });
+  };
+
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    updateByPointer(e);
+  };
+
+  const onPointerUp = () => {
+    dragging = false;
+    window.removeEventListener('pointermove', onPointerMove);
+  };
+
+  const updateByPointer = (e) => {
+    const rect = scrubberTrackEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    scrubberCursorEl.style.left = x + 'px';
+
+    const duration = videoEl.duration || 0;
+    const pct = rect.width ? (x / rect.width) : 0;
+    const targetTime = pct * duration;
+    videoEl.currentTime = targetTime;
+
+    // Update map cursor immediately
+    const track = JSON.parse(scrubberTrackEl.dataset.track || '[]');
+    if (track.length && trackCursorPlacemark) {
+      const trackT = mapVideoToTrackTime(targetTime, duration, track);
+      const p = findNearestPointByTime(track, trackT);
+      trackCursorPlacemark.geometry.setCoordinates(p.coord);
+    }
+  };
+
+  scrubberTrackEl.addEventListener('pointerdown', onPointerDown);
+}
+
+function updateTimeLabel() {
+  const cur = formatTime(videoEl.currentTime || 0);
+  const total = formatTime(videoEl.duration || 0);
+  timeLabelEl.textContent = `${cur} / ${total}`;
+}
+
+function formatTime(t) {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+// История съёмок / таймлапс
+const captureDateSelect = document.getElementById("captureDate");
+const lastCaptureEl = document.getElementById("lastCapture");
+const timelapsePreview = document.getElementById("timelapsePreview");
+
+// Установим дату последней съёмки (последний option в списке)
+lastCaptureEl.textContent = captureDateSelect.options[captureDateSelect.options.length-1].text;
+
+// При смене даты подгружаем соответствующее видео
+captureDateSelect.addEventListener("change", (e) => {
+  const date = e.target.value;
+  timelapsePreview.innerHTML = `
+    <video controls width="100%">
+      <source src="timelapse_${date}.mp4" type="video/mp4">
+    </video>
+  `;
+});
+
+</script>
+</body>
+</html>
