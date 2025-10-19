@@ -163,6 +163,20 @@
       <option value="2025-09-25">25.09.2025</option>
       <option value="2025-10-05" selected>05.10.2025</option>
     </select>
+
+    <div style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">
+      <button class="btn" id="tlPlayAll">▶ Проиграть все даты</button>
+      <button class="btn secondary" id="tlPauseAll">⏸ Пауза</button>
+      <label style="font-size:12px; color:#a3a9b7; display:flex; gap:6px; align-items:center;">
+        Скорость:
+        <input type="range" id="tlSpeed" min="1" max="16" step="1" value="8">
+        <span id="tlSpeedLabel">8×</span>
+      </label>
+      <label style="font-size:12px; color:#a3a9b7; display:flex; gap:6px; align-items:center;">
+        <input type="checkbox" id="tlLoop" checked> Зациклить плейлист
+      </label>
+    </div>
+
     <div id="timelapsePreview" style="margin-top:12px;">
       <video id="timelapseVideo" controls width="100%">
         <source src="timelapse_2025-10-05.mp4" type="video/mp4">
@@ -746,24 +760,85 @@ function formatTime(t) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
-// История съёмок / таймлапс
-const captureDateSelect = document.getElementById("captureDate");
-const lastCaptureEl = document.getElementById("lastCapture");
-const timelapsePreview = document.getElementById("timelapsePreview");
-
-// Установим дату последней съёмки (последний option в списке)
-lastCaptureEl.textContent = captureDateSelect.options[captureDateSelect.options.length-1].text;
-
-// При смене даты подгружаем соответствующее видео
-captureDateSelect.addEventListener("change", (e) => {
-  const date = e.target.value;
-  timelapsePreview.innerHTML = `
-    <video controls width="100%">
-      <source src="timelapse_${date}.mp4" type="video/mp4">
-    </video>
-  `;
-});
-
 </script>
+
+<script>
+(function() {
+  // ---- DOM ----
+  const tlSelect       = document.getElementById('captureDate');
+  const tlVideo        = document.getElementById('timelapseVideo');
+  const tlPlayAllBtn   = document.getElementById('tlPlayAll');
+  const tlPauseAllBtn  = document.getElementById('tlPauseAll');
+  const tlSpeedInput   = document.getElementById('tlSpeed');
+  const tlSpeedLabel   = document.getElementById('tlSpeedLabel');
+  const tlLoopCheckbox = document.getElementById('tlLoop');
+  const lastCaptureEl  = document.getElementById('lastCapture');
+
+  if (!tlSelect || !tlVideo) { console.warn('[Timelapse] Элементы не найдены'); return; }
+
+  // Инициализация подписи «последняя съёмка»
+  lastCaptureEl.textContent = new Date(tlSelect.value).toLocaleDateString('ru-RU');
+
+  // Скорость
+  function applySpeed() {
+    const rate = Number(tlSpeedInput?.value || 1) || 1;
+    tlVideo.playbackRate = rate;
+    if (tlSpeedLabel) tlSpeedLabel.textContent = rate + '×';
+  }
+  applySpeed();
+  tlSpeedInput?.addEventListener('input', applySpeed);
+
+  // Смена даты вручную
+  tlSelect.addEventListener('change', () => {
+    const d = tlSelect.value;
+    lastCaptureEl.textContent = new Date(d).toLocaleDateString('ru-RU');
+    tlVideo.src = `timelapse_${d}.mp4`;
+    tlVideo.load();
+    tlVideo.currentTime = 0;
+    applySpeed();
+  });
+
+  // Плейлист по датам из селекта
+  function getDates() {
+    return Array.from(tlSelect.options).map(o => o.value);
+  }
+
+  let playlist = [];
+  let idx = 0;
+  let playing = false;
+
+  function startPlaylist() {
+    playlist = getDates();
+    idx = 0;
+    playing = true;
+    next();
+  }
+
+  function pausePlaylist() {
+    playing = false;
+    tlVideo.pause();
+  }
+
+  function next() {
+    if (!playing) return;
+    if (idx >= playlist.length) {
+      if (tlLoopCheckbox?.checked) { idx = 0; } else { playing = false; return; }
+    }
+    const d = playlist[idx++];
+    tlSelect.value = d;
+    lastCaptureEl.textContent = new Date(d).toLocaleDateString('ru-RU');
+    tlVideo.src = `timelapse_${d}.mp4`;
+    tlVideo.load();
+    tlVideo.currentTime = 0;
+    applySpeed();
+    tlVideo.play().catch(()=>{});
+  }
+
+  tlPlayAllBtn?.addEventListener('click', startPlaylist);
+  tlPauseAllBtn?.addEventListener('click', pausePlaylist);
+  tlVideo.addEventListener('ended', () => { if (playing) next(); });
+})();
+</script>
+
 </body>
 </html>
