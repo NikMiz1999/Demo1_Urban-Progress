@@ -388,6 +388,9 @@ const TRACK_BY_OBJECT = {
     { coord: [ 55.765, 37.639], t: 30 }
   ]
 };
+// Объекты, временно недоступные для просмотра
+const BLOCKED_OBJECTS = ['obj_002', 'obj_003'];
+
 // Color helpers for status/progress
 function statusColor(status) {
   switch (status) {
@@ -482,6 +485,11 @@ function showCityView() {
 }
 
 function openObject(objectId) {
+
+  if (BLOCKED_OBJECTS.includes(objectId)) {
+    alert('Эти объекты недоступны');
+    return;
+    }
   currentObjectId = objectId;
 
   // Toggle views
@@ -839,27 +847,9 @@ function formatTime(t) {
   tlVideo.addEventListener('ended', () => { if (playing) next(); });
 })();
 
-// Блокировка недоступных объектов
-const BLOCKED_OBJECTS = ['obj_002', 'obj_003'];
 
-function openObject(objectId) {
-  // Проверяем, не заблокирован ли объект
-  if (BLOCKED_OBJECTS.includes(objectId)) {
-    alert('Это демоверсия. Сейчас для просмотра достуеп только объект "Улица 65-летия Октября"');
-    return; // отменяем переход
-  }
-
-  currentObjectId = objectId;
-
-  // Toggle views
-  document.getElementById('cityView').style.display = 'none';
-  document.getElementById('objectView').style.display = 'contents';
-
-  
-}
 
 </script>
 
 </body>
 </html>
-
