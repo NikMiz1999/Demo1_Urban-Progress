@@ -838,6 +838,27 @@ function formatTime(t) {
   tlPauseAllBtn?.addEventListener('click', pausePlaylist);
   tlVideo.addEventListener('ended', () => { if (playing) next(); });
 })();
+
+// Блокировка недоступных объектов
+const BLOCKED_OBJECTS = ['obj_002', 'obj_003'];
+
+function openObject(objectId) {
+  // Проверяем, не заблокирован ли объект
+  if (BLOCKED_OBJECTS.includes(objectId)) {
+    alert('Это демоверсия. Сейчас для просмотра достуеп только объект "Улица 65-летия Октября"');
+    return; // отменяем переход
+  }
+
+  currentObjectId = objectId;
+
+  // Toggle views
+  document.getElementById('cityView').style.display = 'none';
+  document.getElementById('objectView').style.display = 'contents';
+
+  // --- дальше оставляем существующий код функции ---
+  // ...
+}
+
 </script>
 
 </body>
